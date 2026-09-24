@@ -48,11 +48,15 @@ export default class StorePersistence<T extends Model> {
    * @returns a promise that resolves when hydration is complete.
    */
   public hydrate = async (): Promise<void> => {
+    const generation = this.generation;
     try {
       const records = await this.transaction("readonly", (objectStore) =>
         promisifyRequest<Record<string, unknown>[]>(objectStore.getAll())
       );
 
+      if (this.disabled || generation !== this.generation) {
+        return;
+      }
       this.hydrating = true;
       for (const record of records) {
         const id = record?.id;
@@ -60,6 +64,7 @@ export default class StorePersistence<T extends Model> {
           continue;
         }
         this.store.add(this.store.model.fromPersisted<T>(record));
+        this.store.cachedIds.add(id);
       }
     } catch (err) {
       // A closed connection is transient, a later write reopens the database.
@@ -125,6 +130,7 @@ export default class StorePersistence<T extends Model> {
    * @returns a promise that resolves when the records have been removed.
    */
   public clear = async (): Promise<void> => {
+    this.generation++;
     this.dirty.clear();
     this.scheduleFlush.cancel();
 
@@ -295,6 +301,8 @@ export default class StorePersistence<T extends Model> {
   private disabled = false;
 
   private hydrating = false;
+
+  private generation = 0;
 }
 
 /**

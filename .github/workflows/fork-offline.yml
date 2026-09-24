@@ -1,0 +1,52 @@
+name: Fork offline image
+
+on:
+  push:
+    branches: [fork/offline-first]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-offline-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: github.repository == 'juanmaguitar/outline'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.1
+      - run: corepack enable
+      - run: yarn install --immutable
+      - name: Typecheck
+        run: yarn tsc --noEmit
+      - name: Offline regression tests
+        run: >-
+          yarn test app/stores/OfflineDraftsStore.test.ts
+          app/stores/base/OfflineFetch.test.ts
+          app/stores/base/StorePersistence.test.ts
+          app/models/OfflineModels.test.ts
+          app/models/base/ModelPersistence.test.ts
+          shared/utils/offlineNavigation.test.ts
+      - name: Build fork assets
+        run: |
+          yarn vite:build
+          yarn build:server
+          mkdir -p .fork-build
+          cp -R build/app .fork-build/app
+          cp build/server/routes/app.js .fork-build/app.js
+      - name: Build deployment image
+        run: |
+          docker build -f Dockerfile.fork --build-arg FORK_COMMIT="$GITHUB_SHA" -t "outline-fork:$GITHUB_SHA" .
+          docker save "outline-fork:$GITHUB_SHA" | gzip > outline-fork-image.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: outline-fork-${{ github.sha }}
+          path: outline-fork-image.tar.gz
+          retention-days: 7
+          compression-level: 0

@@ -21,7 +21,12 @@ import { getInverseRelationsForModelClass } from "~/models/decorators/Relation";
 import type { Searchable } from "~/models/interfaces/Searchable";
 import type { PaginationParams, PartialExcept, Properties } from "~/types";
 import { client } from "~/utils/ApiClient";
-import { AuthorizationError, NotFoundError } from "~/utils/errors";
+import {
+  AuthorizationError,
+  NetworkError,
+  NotFoundError,
+  OfflineError,
+} from "~/utils/errors";
 import ParanoidModel from "~/models/base/ParanoidModel";
 import StorePersistence from "./StorePersistence";
 
@@ -82,6 +87,12 @@ export default abstract class Store<T extends Model> {
    */
   persistable = false;
 
+  /** Models restored from disk must be revalidated on the next online fetch. */
+  cachedIds = new Set<string>();
+
+  /** Resolves once this store's local data is available. */
+  hydration: Promise<void> = Promise.resolve();
+
   rootStore: RootStore;
 
   protected persistence?: StorePersistence<T>;
@@ -106,6 +117,7 @@ export default abstract class Store<T extends Model> {
 
   @action
   clear() {
+    this.cachedIds.clear();
     this.data.clear();
     void this.persistence?.clear();
   }
@@ -125,11 +137,12 @@ export default abstract class Store<T extends Model> {
       this.persistence ||
       !StorePersistence.isSupported
     ) {
-      return;
+      return this.hydration;
     }
 
     this.persistence = new StorePersistence<T>(this, teamId);
-    await this.persistence.hydrate();
+    this.hydration = this.persistence.hydrate();
+    await this.hydration;
   }
 
   /**
@@ -212,6 +225,10 @@ export default abstract class Store<T extends Model> {
   @action
   add = (item: PartialExcept<T, "id"> | T): T => {
     const ModelClass = this.model;
+
+    if (!(item instanceof ModelClass)) {
+      this.cachedIds.delete(item.id);
+    }
 
     if (!(item instanceof ModelClass)) {
       const existingModel = this.data.get(item.id);
@@ -446,13 +463,21 @@ export default abstract class Store<T extends Model> {
       throw new Error(`Cannot fetch ${this.modelName}`);
     }
 
+    await this.hydration;
     const item = this.get(id);
-    if (item && !options.force) {
+    if (
+      item &&
+      ((!options.force && !this.cachedIds.has(item.id)) || !navigator.onLine)
+    ) {
       return item;
     }
 
     if (this.requests.has(id)) {
       return this.requests.get(id);
+    }
+
+    if (!navigator.onLine) {
+      throw new OfflineError("This document is not available on this device");
     }
 
     this.isFetching = true;
@@ -471,10 +496,17 @@ export default abstract class Store<T extends Model> {
         )
         .catch((err) => {
           if (
+            item &&
+            (err instanceof OfflineError || err instanceof NetworkError)
+          ) {
+            resolve(item);
+            return;
+          }
+          if (
             err instanceof AuthorizationError ||
             err instanceof NotFoundError
           ) {
-            this.remove(id);
+            this.remove(item?.id ?? id, { permanent: true });
           }
 
           reject(err);

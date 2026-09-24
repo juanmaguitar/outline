@@ -136,6 +136,18 @@ if (
             "[ServiceWorker] Registered.",
             registration
           );
+          const warmShell = () => {
+            if (navigator.serviceWorker.controller) {
+              void fetch("/capture", { credentials: "same-origin" }).catch(
+                () => undefined
+              );
+            }
+          };
+          navigator.serviceWorker.addEventListener(
+            "controllerchange",
+            warmShell
+          );
+          void navigator.serviceWorker.ready.then(warmShell);
         })
         .catch((registrationError) => {
           Logger.debug(

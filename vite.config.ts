@@ -7,6 +7,7 @@ import type { ConfigEnv, ServerOptions } from "vite";
 import { defineConfig } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 import environment from "./server/utils/environment";
+import { offlineNavigation } from "./shared/utils/offlineNavigation";
 
 let httpsConfig: ServerOptions["https"] | undefined;
 let host: string | undefined;
@@ -61,7 +62,7 @@ export default ({ mode }: ConfigEnv) =>
         registerType: "autoUpdate",
         workbox: {
           maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
-          globPatterns: ["**/*.{css,ico,png,svg}"],
+          globPatterns: ["**/*.{js,css,ico,png,svg}"],
           navigateFallback: null,
           modifyURLPrefix: {
             "": `${environment.CDN_URL ?? ""}/static/`,
@@ -70,6 +71,16 @@ export default ({ mode }: ConfigEnv) =>
           clientsClaim: true,
           cleanupOutdatedCaches: true,
           runtimeCaching: [
+            offlineNavigation(String(Date.now())),
+            {
+              urlPattern: /\/locales\/[a-zA-Z_-]+\.json$/,
+              handler: "StaleWhileRevalidate",
+              options: {
+                cacheName: "locales-cache",
+                expiration: { maxEntries: 10 },
+                cacheableResponse: { statuses: [200] },
+              },
+            },
             {
               // Chunks are content-hashed and immutable, so cache them on
               // first use rather than precaching the entire build.
@@ -124,7 +135,8 @@ export default ({ mode }: ConfigEnv) =>
           short_name: "Outline",
           theme_color: "#fff",
           background_color: "#fff",
-          start_url: "/",
+          start_url: "/capture",
+          shortcuts: [{ name: "Quick note", url: "/capture" }],
           scope: ".",
           display: "standalone",
           // For Chrome, you must provide at least a 192x192 pixel icon, and a 512x512 pixel icon.

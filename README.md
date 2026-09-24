@@ -20,6 +20,42 @@ This is the source code that runs [**Outline**](https://www.getoutline.com) and 
 
 If you'd like to run your own copy of Outline or contribute to development then this is the place for you.
 
+# Offline capture fork
+
+The `fork/offline-first` branch is based on Outline **v1.10.0**, with the original
+repository kept as `upstream`. It adds a `/capture` page and a PWA shortcut for
+writing notes directly to IndexedDB. Open the application online once and allow
+its service worker to finish installing before using it offline.
+
+Text is saved locally while typing. **Save note** queues an immutable copy for
+delivery to the current user's private Drafts. Synchronization retries while the
+application is open, verifies the current account, and uses stable document IDs
+to recover a successful creation whose response was lost. Unfinished notes can
+be reopened after closing the application. Previously loaded documents and
+collection navigation are also cached per workspace and user.
+
+This is an initial offline capture implementation, not full offline parity.
+Unvisited documents, uploads, permissions, document moves, and server searches
+still need a connection. Background synchronization after closing the app is not
+provided. Browser storage can be cleared or evicted; local notes are not a backup.
+Existing rich-text collaboration retains Outline's original behavior.
+
+The **Fork offline image** workflow validates and builds a Docker image artifact
+tagged `outline-fork:<commit>`. `Dockerfile.fork` overlays the web build and the
+app-shell route on the pinned official 1.10.0 runtime, without changing its
+dependencies or database schema. Load the downloaded archive with `docker load`,
+then use that exact image tag and `pull_policy: never` in the deployment Compose
+configuration. Keep the previous image and a database backup for rollback.
+
+Browser smoke checks use the real production frontend with a local fixture API:
+run `yarn vite:build`, then `node app/test/offline-server.cjs`. With
+`playwright/test` available on `NODE_PATH`, run
+`node app/test/offline-browser.cjs`, and repeat with `OUTLINE_BROWSER=webkit`.
+The checks cover opening offline, reading a cached document, closing/reopening a
+local note, and reconnecting without creating duplicates. WebKit simulates an
+unreachable server because Playwright's offline navigation emulation has a known
+[WebKit issue](https://github.com/microsoft/playwright/issues/42775).
+
 # Installation
 
 Please see the [documentation](https://docs.getoutline.com/s/hosting/) for running your own copy of Outline in a production configuration.

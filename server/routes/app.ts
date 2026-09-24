@@ -195,6 +195,11 @@ export const renderApp = async (
   }
 
   // Ensure no caching is performed
+  // Only the generic app shell is eligible for the offline navigation cache.
+  // Public share pages can embed document contents and must never be reused.
+  if (!options.isShare && !options.rootShareId) {
+    ctx.response.set("X-Outline-App-Shell", "1");
+  }
   ctx.response.set("Cache-Control", "no-cache, must-revalidate");
   ctx.response.set("Expires", "-1");
 

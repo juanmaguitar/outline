@@ -126,13 +126,14 @@ export default class RootStore {
    */
   public enablePersistence() {
     const teamId = this.auth.currentTeamId;
-    if (!teamId) {
+    const userId = this.auth.currentUserId;
+    if (!teamId || !userId) {
       return;
     }
 
     Object.values(this).forEach((store) => {
       if (store instanceof Store) {
-        void store.enablePersistence(teamId);
+        void store.enablePersistence(`${teamId}.${userId}`);
       }
     });
   }

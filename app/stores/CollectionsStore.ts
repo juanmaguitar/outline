@@ -14,6 +14,8 @@ import type RootStore from "./RootStore";
 import Store from "./base/Store";
 
 export default class CollectionsStore extends Store<Collection> {
+  persistable = true;
+
   constructor(rootStore: RootStore) {
     super(rootStore, Collection);
   }

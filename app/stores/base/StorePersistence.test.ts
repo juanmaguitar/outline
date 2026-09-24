@@ -9,6 +9,25 @@ import RootStore from "~/stores/RootStore";
 import StorePersistence from "./StorePersistence";
 
 describe("StorePersistence", () => {
+  it("does not restore cached data after it is cleared during hydration", async () => {
+    const source = new RootStore();
+    source.policies.add({ id: "private-doc", abilities: { read: true } });
+    const original = new StorePersistence(
+      source.policies,
+      "logout-during-hydration"
+    );
+    original.persist("private-doc");
+    await original.flush();
+    original.disable();
+    const target = new RootStore();
+    const persistence = new StorePersistence(
+      target.policies,
+      "logout-during-hydration"
+    );
+    const hydration = persistence.hydrate();
+    await Promise.all([hydration, persistence.clear()]);
+    expect(target.policies.data.has("private-doc")).toBe(false);
+  });
   it("round-trips models through IndexedDB into a fresh store", async () => {
     const teamId = "team-1";
     const source = new RootStore();

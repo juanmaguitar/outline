@@ -19,14 +19,29 @@ export async function deleteAllDatabases() {
   stores.disablePersistence();
 
   const teamId = stores.auth.currentTeamId;
+  const userId = stores.auth.currentUserId;
   if (teamId) {
     Object.values(stores).forEach((store) => {
       if (store instanceof Store && store.persistable) {
         window.indexedDB.deleteDatabase(
           StorePersistence.databaseName(store.apiEndpoint, teamId)
         );
+        if (userId) {
+          window.indexedDB.deleteDatabase(
+            StorePersistence.databaseName(
+              store.apiEndpoint,
+              `${teamId}.${userId}`
+            )
+          );
+        }
       }
     });
+  }
+
+  if (teamId && userId) {
+    window.indexedDB.deleteDatabase(
+      `outline.offline-drafts.${teamId}.${userId}`
+    );
   }
 
   if ("databases" in window.indexedDB) {

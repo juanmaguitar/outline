@@ -13,6 +13,7 @@ import useQuery from "~/hooks/useQuery";
 import useStores from "~/hooks/useStores";
 import { preloadEditor } from "~/routes/scenes";
 import { documentEditPath, documentPath } from "~/utils/routeHelpers";
+import { NetworkError, OfflineError } from "~/utils/errors";
 
 function DocumentNew() {
   const history = useHistory();
@@ -26,6 +27,10 @@ function DocumentNew() {
   const id = match.params.collectionSlug || query.get("collectionId");
 
   useEffect(() => {
+    if (!navigator.onLine) {
+      history.replace("/capture");
+      return;
+    }
     // Download the editor while the document is being created on the server
     preloadEditor();
 
@@ -76,6 +81,10 @@ function DocumentNew() {
           location.state
         );
       } catch (_err) {
+        if (_err instanceof OfflineError || _err instanceof NetworkError) {
+          history.replace("/capture");
+          return;
+        }
         toast.error(t("Couldn’t create the document, try again?"));
         history.goBack();
       }

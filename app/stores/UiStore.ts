@@ -533,6 +533,7 @@ class UiStore {
   get readyToShow() {
     return (
       !this.rootStore.auth.user ||
+      this.rootStore.collections.data.size > 0 ||
       (this.rootStore.collections.isLoaded &&
         this.rootStore.stars.isLoaded &&
         this.rootStore.userMemberships.isLoaded)

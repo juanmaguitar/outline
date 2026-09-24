@@ -11,6 +11,9 @@ import { getRelationsForModelClass } from "../decorators/Relation";
 export default abstract class Model {
   static modelName: string;
 
+  /** Read-only fields needed to restore a cached model, never sent to the API. */
+  static persistedFields: string[] = [];
+
   /**
    * Restores data written by toPersisted to the shape the model expects,
    * discarding any properties that are not declared fields. Records written by
@@ -23,7 +26,9 @@ export default abstract class Model {
     record: Record<string, unknown>
   ): PartialExcept<T, "id"> {
     const fields = getFieldsForModelClass(this);
-    return JSON.parse(JSON.stringify(pick(record, ["id", ...fields])));
+    return JSON.parse(
+      JSON.stringify(pick(record, ["id", ...fields, ...this.persistedFields]))
+    );
   }
 
   @observable
@@ -225,7 +230,13 @@ export default abstract class Model {
    * @returns A plain object representation of the model
    */
   toPersisted = (): PartialExcept<Model, "id"> =>
-    JSON.parse(JSON.stringify({ ...this.toAPI(), id: this.id }));
+    JSON.parse(
+      JSON.stringify({
+        ...this.toAPI(),
+        ...pick(this, this.store.model.persistedFields),
+        id: this.id,
+      })
+    );
 
   /**
    * Returns a plain object representation of all the properties on the model

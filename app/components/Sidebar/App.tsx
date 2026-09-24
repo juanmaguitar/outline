@@ -137,6 +137,9 @@ function AppSidebar() {
               onClickIntent={Scenes.Search.preload}
             />
             {can.createDocument && <DraftsLink />}
+            {can.createDocument && (
+              <SidebarLink to="/capture" label={t("Quick note")} />
+            )}
           </Section>
         </Overflow>
         <Scrollable flex shadow ref={scrollRef}>

@@ -44,6 +44,8 @@ type ImportOptions = {
 };
 
 export default class DocumentsStore extends Store<Document> {
+  persistable = true;
+
   @observable
   backlinks: Map<string, string[]> = new Map();
 

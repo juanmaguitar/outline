@@ -19,6 +19,16 @@ import { AfterChange } from "./decorators/Lifecycle";
 export default class Collection extends ParanoidModel {
   static modelName = "Collection";
 
+  static persistedFields = [
+    "url",
+    "urlId",
+    "documents",
+    "createdAt",
+    "updatedAt",
+    "archivedAt",
+    "deletedAt",
+  ];
+
   store: CollectionsStore;
 
   /** The name of the collection. */
@@ -246,6 +256,7 @@ export default class Collection extends ParanoidModel {
 
       runInAction("Collection#fetchDocuments", () => {
         this.documents = res.data;
+        this.store.add(this);
       });
     } finally {
       this.isFetching = false;

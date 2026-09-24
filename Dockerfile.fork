@@ -1,0 +1,8 @@
+# Keep the runtime and database schema identical to the deployed 1.10.0 release.
+FROM outlinewiki/outline:1.10.0@sha256:cc9f1f05fd7cd316745b5fc9cfe01e681b1b4cf97705d1d812a5c778d7986cfd
+ARG FORK_COMMIT
+LABEL org.opencontainers.image.source="https://github.com/juanmaguitar/outline"
+LABEL org.opencontainers.image.revision="${FORK_COMMIT}"
+LABEL org.opencontainers.image.description="Outline 1.10.0 with offline capture and navigation"
+COPY --chown=nodejs:nodejs .fork-build/app /opt/outline/build/app
+COPY --chown=nodejs:nodejs .fork-build/app.js /opt/outline/build/server/routes/app.js

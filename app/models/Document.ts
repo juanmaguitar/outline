@@ -40,6 +40,24 @@ type SaveOptions = JSONObject & {
 export default class Document extends ArchivableModel implements Searchable {
   static modelName = "Document";
 
+  static persistedFields = [
+    "data",
+    "url",
+    "urlId",
+    "createdAt",
+    "updatedAt",
+    "publishedAt",
+    "archivedAt",
+    "deletedAt",
+    "createdBy",
+    "updatedBy",
+    "revision",
+    "tasks",
+    "lastViewedAt",
+    "collaboratorIds",
+    "isCollectionDeleted",
+  ];
+
   constructor(fields: Record<string, unknown>, store: DocumentsStore) {
     super(fields, store);
 

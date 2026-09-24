@@ -1,6 +1,8 @@
 dist
 build
 node_modules/*
+.fork-build/
+outline-fork-image.tar.gz
 .env
 .env.local
 .env.production
