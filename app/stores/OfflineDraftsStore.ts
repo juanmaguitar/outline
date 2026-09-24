@@ -115,6 +115,44 @@ export class OfflineDraftsStore {
     }
   }
 
+  /**
+   * Removes only confirmed synced copies from this account's local storage.
+   *
+   * @param id the individual copy to remove, or omit to remove all synced copies.
+   */
+  removeSynced(id?: string): Promise<void> {
+    const write = this.writes.then(async () => {
+      const database = await this.open();
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const transaction = database.transaction("drafts", "readwrite");
+          const request = transaction.objectStore("drafts").openCursor(id);
+          request.onsuccess = () => {
+            const cursor = request.result;
+            if (!cursor) {
+              return;
+            }
+            if (cursor.value.status === "synced") {
+              cursor.delete();
+            }
+            cursor.continue();
+          };
+          transaction.oncomplete = () => resolve();
+          transaction.onerror = () => reject(transaction.error);
+          transaction.onabort = () =>
+            reject(
+              transaction.error ?? new Error("Removing local copies failed")
+            );
+        });
+      } finally {
+        database.close();
+      }
+      await this.load();
+    });
+    this.writes = write.catch(() => undefined);
+    return write;
+  }
+
   /** Stops delivery when the owning session is no longer active. */
   close(): void {
     this.closed = true;

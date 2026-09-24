@@ -6,6 +6,78 @@ describe("offline capture", () => {
   let scope = 0;
   const createStore = () => new OfflineDraftsStore(`team.user.${++scope}`);
 
+  const remote = {
+    find: async () => ({ url: "/doc/saved-abcdefghij" }),
+    create: vi.fn(),
+  };
+
+  it("removes one synced copy durably, leaving other synced copies intact", async () => {
+    const store = createStore();
+    for (const id of ["one", "two"]) {
+      await store.save({ ...draft, id });
+      await store.queue(id);
+    }
+    await store.sync(remote);
+    await store.removeSynced("one");
+    const reopened = new OfflineDraftsStore(store.scope);
+    await reopened.load();
+    expect(reopened.drafts.map((note) => note.id)).toEqual(["two"]);
+  });
+
+  it("bulk removal preserves unfinished and queued notes, including pending writes", async () => {
+    const store = createStore();
+    await store.save(draft);
+    await store.queue(draft.id);
+    await store.sync(remote);
+    const writing = store.save({ ...draft, id: "unfinished" });
+    const saving = store.save({ ...draft, id: "pending" });
+    const queueing = store.queue("pending");
+    await store.removeSynced();
+    await Promise.all([writing, saving, queueing]);
+    const reopened = new OfflineDraftsStore(store.scope);
+    await reopened.load();
+    expect(reopened.drafts.slice()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "unfinished", status: "draft" }),
+        expect.objectContaining({ id: "pending", status: "queued" }),
+      ])
+    );
+    expect(reopened.drafts).toHaveLength(2);
+  });
+
+  it("checks persisted status before individual removal and isolates accounts", async () => {
+    const store = createStore();
+    await store.save(draft);
+    await store.removeSynced(draft.id);
+    expect(store.drafts).toHaveLength(1);
+    await store.queue(draft.id);
+    await store.removeSynced(draft.id);
+    expect(store.drafts[0].status).toBe("queued");
+    await store.sync(remote);
+    await createStore().removeSynced();
+    await store.load();
+    expect(store.drafts).toHaveLength(1);
+    const stale = new OfflineDraftsStore(store.scope);
+    await stale.removeSynced();
+    await store.load();
+    expect(store.drafts).toEqual([]);
+  });
+
+  it("does not remove a queued note while its server request is in flight", async () => {
+    const store = createStore();
+    await store.save(draft);
+    await store.queue(draft.id);
+    await store.sync({
+      find: async () => {
+        await store.removeSynced();
+        expect(store.drafts[0].status).toBe("queued");
+        return { url: "/doc/saved-abcdefghij" };
+      },
+      create: vi.fn(),
+    });
+    expect(store.drafts[0].status).toBe("synced");
+  });
+
   it("restores an unfinished note after closing and reopening", async () => {
     const store = createStore();
     await store.save(draft);

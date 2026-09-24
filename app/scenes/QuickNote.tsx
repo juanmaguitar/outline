@@ -18,7 +18,24 @@ export const QuickNote = observer(function QuickNote() {
     "empty"
   );
   const [queueing, setQueueing] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [removeError, setRemoveError] = useState(false);
   const revision = useRef(0);
+  const syncedCount = store.drafts.filter(
+    (item) => item.status === "synced"
+  ).length;
+
+  const handleRemove = async (id?: string) => {
+    setRemoving(true);
+    setRemoveError(false);
+    try {
+      await store.removeSynced(id);
+    } catch (_error) {
+      setRemoveError(true);
+    } finally {
+      setRemoving(false);
+    }
+  };
 
   useEffect(() => {
     if (status !== "saving" && status !== "error") {
@@ -116,6 +133,16 @@ export const QuickNote = observer(function QuickNote() {
       </Form>
       {error && <p role="alert">{t(error)}</p>}
       <h2>{t("Notes on this device")}</h2>
+      <p>
+        {t(
+          "Removing local copies keeps your notes in Outline. Unsent notes are kept on this device."
+        )}
+      </p>
+      {removeError && (
+        <p role="alert">
+          {t("Could not remove local copies. Please try again.")}
+        </p>
+      )}
       {store.isSyncing && <p role="status">{t("Syncing…")}</p>}
       <Button
         neutral
@@ -126,6 +153,11 @@ export const QuickNote = observer(function QuickNote() {
       >
         {t("Sync now")}
       </Button>
+      {syncedCount > 0 && (
+        <Button neutral disabled={removing} onClick={() => void handleRemove()}>
+          {t("Remove all synced local copies")} ({syncedCount})
+        </Button>
+      )}
       <Notes>
         {store.drafts
           .filter((item) => item.id !== draft.id)
@@ -153,10 +185,25 @@ export const QuickNote = observer(function QuickNote() {
                 </Button>
               ) : item.status === "queued" ? (
                 <span>{t("Saved on this device · Waiting to sync")}</span>
-              ) : item.url?.startsWith("/doc/") ? (
-                <Link to={item.url}>{t("Open saved note")}</Link>
               ) : (
-                <span>{t("Synced")}</span>
+                <>
+                  <SyncedStatus role="status">
+                    <span aria-hidden="true">✓ </span>
+                    {t("Synced with Outline")}
+                  </SyncedStatus>
+                  <Actions>
+                    {item.url?.startsWith("/doc/") && (
+                      <Link to={item.url}>{t("Open saved note")}</Link>
+                    )}
+                    <Button
+                      neutral
+                      disabled={removing}
+                      onClick={() => void handleRemove(item.id)}
+                    >
+                      {t("Remove local copy")}
+                    </Button>
+                  </Actions>
+                </>
               )}
             </li>
           ))}
@@ -169,6 +216,15 @@ const Form = styled.form`
   display: grid;
   gap: 8px;
   margin: 24px 0;
+`;
+const SyncedStatus = styled.p`
+  font-weight: 600;
+`;
+const Actions = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
 `;
 const TitleInput = styled.input`
   font: inherit;
