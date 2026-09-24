@@ -32,6 +32,7 @@ jobs:
           app/stores/base/StorePersistence.test.ts
           app/models/OfflineModels.test.ts
           app/models/base/ModelPersistence.test.ts
+          app/utils/csrf.test.ts
           shared/utils/offlineNavigation.test.ts
       - name: Build fork assets
         run: |

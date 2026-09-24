@@ -4,14 +4,20 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import type { ReactNode } from "react";
 import { observer } from "mobx-react";
 import { OfflineDraftsStore } from "~/stores/OfflineDraftsStore";
 import useStores from "~/hooks/useStores";
-import { NotFoundError } from "~/utils/errors";
+import {
+  AuthorizationError,
+  BadRequestError,
+  NotFoundError,
+} from "~/utils/errors";
 import { client } from "~/utils/ApiClient";
+import { getCSRFToken, refreshCSRFToken } from "~/utils/csrf";
 
 interface OfflineNotesContext {
   store: OfflineDraftsStore;
@@ -37,15 +43,18 @@ export const OfflineNotesProvider = observer(function OfflineNotesProvider({
   );
   const [online, setOnline] = useState(navigator.onLine);
   const [error, setError] = useState<string>();
+  const syncing = useRef(false);
 
   const sync = useCallback(async () => {
     if (
       !navigator.onLine ||
+      syncing.current ||
       store.isSyncing ||
       !store.drafts.some((draft) => draft.status === "queued")
     ) {
       return;
     }
+    syncing.current = true;
     try {
       // Verify the live session before sending notes from a locally cached user.
       const response = await client.post("/auth.info");
@@ -54,9 +63,12 @@ export const OfflineNotesProvider = observer(function OfflineNotesProvider({
         response.data.team.id !== teamId
       ) {
         store.close();
-        throw new Error(
+        throw new AuthorizationError(
           "Sign in with the account that created these notes to sync them."
         );
+      }
+      if (!getCSRFToken()) {
+        await refreshCSRFToken();
       }
       await store.sync({
         find: async (id) => {
@@ -76,10 +88,16 @@ export const OfflineNotesProvider = observer(function OfflineNotesProvider({
           ),
       });
       setError(undefined);
-    } catch (_error) {
+    } catch (error) {
       setError(
-        "Your notes are still saved on this device. Synchronization will retry when a connection is available."
+        error instanceof AuthorizationError
+          ? "Your notes are still saved on this device. Outline could not authorize synchronization. Open Outline with the account that saved these notes, then try again."
+          : error instanceof BadRequestError
+            ? "Your notes are still saved on this device. Outline rejected the note. Please try again."
+            : "Your notes are still saved on this device. Synchronization will retry when a connection is available."
       );
+    } finally {
+      syncing.current = false;
     }
   }, [store, documents, teamId, userId]);
 

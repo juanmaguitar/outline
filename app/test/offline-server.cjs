@@ -89,6 +89,8 @@ http
         reference,
         documents: [...documents.values()],
       });
+    if (!pathname.startsWith("/api/"))
+      res.setHeader("Set-Cookie", "csrfToken=fixture-token; Path=/; SameSite=Lax");
     if (pathname.startsWith("/api/")) {
       let raw = "";
       for await (const chunk of req) raw += chunk;
@@ -101,6 +103,11 @@ http
       if (pathname === "/api/notifications.list")
         return json({ data: { notifications: [] } });
       if (pathname === "/api/documents.create") {
+        if (
+          !req.headers.cookie?.includes("csrfToken=fixture-token") ||
+          req.headers["x-csrf-token"] !== "fixture-token"
+        )
+          return json({ error: "csrf_error", message: "CSRF token missing" }, 403);
         if (documents.has(body.id))
           return json(
             { error: "validation_error", message: "Duplicate id" },

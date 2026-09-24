@@ -124,6 +124,10 @@ const target = "http://localhost:4389";
       path: `${process.env.TMPDIR || "/tmp/"}outline-${process.env.OUTLINE_BROWSER || "chromium"}-offline.png`,
       fullPage: true,
     });
+    // A browser restart can drop session cookies while preserving the queued
+    // note and persistent login. Reconnection must restore write protection.
+    await context.clearCookies({ name: "csrfToken" });
+    await context.clearCookies({ name: "__Host-csrfToken" });
     if (engine === webkit) await fetch(`${target}/test-network?offline=0`);
     else await context.setOffline(false);
     await expect(
