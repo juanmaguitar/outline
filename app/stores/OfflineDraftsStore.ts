@@ -1,6 +1,11 @@
 import { observable, runInAction } from "mobx";
 
-/** A locally durable note; queued content is immutable until synchronization. */
+interface NoteSnapshot {
+  title: string;
+  text: string;
+}
+
+/** A locally durable note that remains editable while synchronization runs. */
 export interface OfflineDraft {
   id: string;
   title: string;
@@ -8,13 +13,25 @@ export interface OfflineDraft {
   updatedAt: string;
   status: "draft" | "queued" | "synced";
   url?: string;
+  remoteRevision?: number;
+  lastSynced?: NoteSnapshot;
+  pending?: NoteSnapshot;
 }
 
 /** The authenticated document operations needed to deliver a queued note. */
 export interface OfflineDraftRemote {
-  find(id: string): Promise<{ url: string } | undefined>;
-  create(draft: OfflineDraft): Promise<{ url: string }>;
+  find(
+    id: string
+  ): Promise<({ url: string; revision: number } & NoteSnapshot) | undefined>;
+  create(draft: OfflineDraft): Promise<{ url: string; revision: number }>;
+  update(
+    draft: OfflineDraft,
+    lastRevision: number
+  ): Promise<{ url: string; revision: number }>;
 }
+
+/** Raised when the online note changed since Quick Note last synchronized. */
+export class OfflineDraftConflictError extends Error {}
 
 /** Stores quick notes separately from the replaceable document cache. */
 export class OfflineDraftsStore {
@@ -53,29 +70,49 @@ export class OfflineDraftsStore {
   /** Durably saves an unfinished note, without requiring a server connection. */
   save(draft: Pick<OfflineDraft, "id" | "title" | "text">): Promise<void> {
     return this.write(draft.id, (previous) => {
-      if (previous && previous.status !== "draft") {
-        throw new Error("This note is already queued for synchronization");
-      }
-      return { ...draft, status: "draft", updatedAt: new Date().toISOString() };
+      const unchanged =
+        previous?.lastSynced?.title === draft.title &&
+        previous.lastSynced.text === draft.text;
+      return {
+        ...previous,
+        ...draft,
+        lastSynced:
+          previous?.lastSynced ??
+          (previous?.status === "synced" && previous.url
+            ? { title: previous.title, text: previous.text }
+            : undefined),
+        status:
+          previous?.status === "draft"
+            ? "draft"
+            : unchanged && !previous?.pending
+              ? "synced"
+              : previous
+                ? "queued"
+                : "draft",
+        updatedAt: new Date().toISOString(),
+      };
     });
   }
 
-  /** Freezes the saved content for retry-safe delivery when connected. */
+  /** Queues a local note for delivery while keeping it editable. */
   queue(id: string): Promise<void> {
     return this.write(id, (draft) => {
-      if (!draft || draft.status !== "draft") {
+      if (!draft) {
         throw new Error("The draft is not available");
       }
       if (!draft.title.trim() && !draft.text.trim()) {
         throw new Error("The note is empty");
+      }
+      if (draft.status === "synced") {
+        return draft;
       }
       return { ...draft, status: "queued" };
     });
   }
 
   /**
-   * Delivers queued notes with stable IDs. A lookup recovers successful creates
-   * whose response was lost, without overwriting subsequent server-side edits.
+   * Delivers a durable snapshot while allowing further edits to queue behind it.
+   * Revision checks prevent overwriting changes made to the online document.
    *
    * @param remote authenticated operations for this exact workspace and user.
    */
@@ -93,11 +130,80 @@ export class OfflineDraftsStore {
         if (this.closed) {
           return;
         }
+        if (!draft.pending) {
+          await this.write(draft.id, (current) => {
+            if (!current) {
+              throw new Error("The queued note is not available");
+            }
+            return {
+              ...current,
+              pending: { title: current.title, text: current.text },
+            };
+          });
+        }
+        const currentDraft = this.drafts.find((item) => item.id === draft.id);
+        if (!currentDraft?.pending) {
+          throw new Error("The queued note is not available");
+        }
+        const snapshot = currentDraft.pending;
         const existing = await remote.find(draft.id);
         if (this.closed) {
           return;
         }
-        const document = existing ?? (await remote.create(draft));
+        let document: { url: string; revision: number };
+        if (draft.remoteRevision === undefined && draft.lastSynced) {
+          if (!existing) {
+            throw new OfflineDraftConflictError("The online note is missing");
+          }
+          if (
+            existing.title === snapshot.title &&
+            existing.text === snapshot.text
+          ) {
+            document = existing;
+          } else if (
+            existing.title === draft.lastSynced.title &&
+            existing.text === draft.lastSynced.text
+          ) {
+            document = await remote.update(
+              { ...draft, ...snapshot },
+              existing.revision
+            );
+          } else {
+            throw new OfflineDraftConflictError("The online note has changed");
+          }
+        } else if (draft.remoteRevision === undefined) {
+          if (existing) {
+            if (
+              existing.title !== snapshot.title ||
+              existing.text !== snapshot.text
+            ) {
+              throw new OfflineDraftConflictError(
+                "The online note has changed"
+              );
+            }
+            document = existing;
+          } else {
+            document = await remote.create({ ...draft, ...snapshot });
+          }
+        } else {
+          if (!existing) {
+            throw new OfflineDraftConflictError("The online note is missing");
+          }
+          if (
+            existing.revision === draft.remoteRevision + 1 &&
+            existing.title === snapshot.title &&
+            existing.text === snapshot.text
+          ) {
+            document = existing;
+          } else if (existing.revision !== draft.remoteRevision) {
+            throw new OfflineDraftConflictError("The online note has changed");
+          } else {
+            document = await remote.update(
+              { ...draft, ...snapshot },
+              draft.remoteRevision
+            );
+          }
+        }
         if (this.closed) {
           return;
         }
@@ -105,7 +211,17 @@ export class OfflineDraftsStore {
           if (!current) {
             throw new Error("The queued note is not available");
           }
-          return { ...current, status: "synced", url: document.url };
+          return {
+            ...current,
+            status:
+              current.title === snapshot.title && current.text === snapshot.text
+                ? "synced"
+                : "queued",
+            url: document.url,
+            remoteRevision: document.revision,
+            lastSynced: snapshot,
+            pending: undefined,
+          };
         });
       }
     } finally {

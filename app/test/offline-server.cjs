@@ -56,6 +56,7 @@ const reference = {
 };
 documents.set(reference.id, reference);
 let creates = 0;
+let updates = 0;
 let disconnected = false;
 const mime = {
   ".js": "text/javascript",
@@ -86,11 +87,15 @@ http
       return json({
         auth,
         creates,
+        updates,
         reference,
         documents: [...documents.values()],
       });
     if (!pathname.startsWith("/api/"))
-      res.setHeader("Set-Cookie", "csrfToken=fixture-token; Path=/; SameSite=Lax");
+      res.setHeader(
+        "Set-Cookie",
+        "csrfToken=fixture-token; Path=/; SameSite=Lax"
+      );
     if (pathname.startsWith("/api/")) {
       let raw = "";
       for await (const chunk of req) raw += chunk;
@@ -107,7 +112,10 @@ http
           !req.headers.cookie?.includes("csrfToken=fixture-token") ||
           req.headers["x-csrf-token"] !== "fixture-token"
         )
-          return json({ error: "csrf_error", message: "CSRF token missing" }, 403);
+          return json(
+            { error: "csrf_error", message: "CSRF token missing" },
+            403
+          );
         if (documents.has(body.id))
           return json(
             { error: "validation_error", message: "Duplicate id" },
@@ -122,6 +130,7 @@ http
           updatedBy: user,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
+          revision: 1,
           data: {
             type: "doc",
             content: [
@@ -137,6 +146,22 @@ http
           data: doc,
           policies: [{ id: doc.id, abilities: { read: true, update: true } }],
         });
+      }
+      if (pathname === "/api/documents.update") {
+        const existing = documents.get(body.id);
+        if (!existing) return json({ error: "not_found" }, 404);
+        if (body.lastRevision !== existing.revision)
+          return json({ error: "document_conflict" }, 409);
+        updates++;
+        const doc = {
+          ...existing,
+          title: body.title,
+          text: body.text,
+          revision: existing.revision + 1,
+          updatedAt: new Date().toISOString(),
+        };
+        documents.set(doc.id, doc);
+        return json({ data: doc });
       }
       if (pathname === "/api/documents.info") {
         const doc =

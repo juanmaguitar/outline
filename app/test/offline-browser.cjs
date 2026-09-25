@@ -3,7 +3,10 @@ const { chromium, webkit, expect } = require("playwright/test");
 const target = "http://localhost:4389";
 (async () => {
   const engine = process.env.OUTLINE_BROWSER === "webkit" ? webkit : chromium;
-  const browser = await engine.launch({ headless: false });
+  const browser = await engine.launch({
+    headless: process.env.OUTLINE_HEADED !== "1",
+    ...(process.env.OUTLINE_CHROME === "1" ? { channel: "chrome" } : {}),
+  });
   try {
     await fetch(`${target}/test-network?offline=0`);
     const context = await browser.newContext({
@@ -131,7 +134,9 @@ const target = "http://localhost:4389";
     if (engine === webkit) await fetch(`${target}/test-network?offline=0`);
     else await context.setOffline(false);
     await expect(
-      page.getByRole("link", { name: "Open saved note" })
+      page
+        .getByRole("status")
+        .filter({ hasText: "Synced with Outline · Available offline" })
     ).toBeVisible({ timeout: 30000 });
     const result = await (
       await context.request.get(`${target}/test-state`)
@@ -142,7 +147,7 @@ const target = "http://localhost:4389";
     );
     await page.reload();
     await expect(
-      page.getByRole("link", { name: "Open saved note" })
+      page.getByRole("button", { name: "Continue writing" })
     ).toBeVisible();
     expect(
       (await (await context.request.get(`${target}/test-state`)).json()).creates
@@ -154,34 +159,107 @@ const target = "http://localhost:4389";
       path: `${process.env.TMPDIR || "/tmp/"}outline-${process.env.OUTLINE_BROWSER || "chromium"}-synced.png`,
       fullPage: true,
     });
-    await expect(page.getByRole("status").filter({ hasText: "Synced with Outline" })).toBeVisible();
-    await page.getByRole("button", { name: "Remove local copy", exact: true }).click();
-    await expect(page.getByRole("link", { name: "Open saved note" })).toHaveCount(0);
+    if (engine === webkit) await fetch(`${target}/test-network?offline=1`);
+    else await context.setOffline(true);
+    await page.close();
+    page = await context.newPage();
+    await page.goto(`${target}/capture`);
+    await page.getByRole("button", { name: "Continue writing" }).click();
+    await expect(page.getByLabel("Note", { exact: true })).toHaveValue(
+      "Written without a network. Last keystroke ✓"
+    );
+    await page
+      .getByLabel("Note", { exact: true })
+      .fill("Edited after the first sync, still offline ✓");
+    await expect(
+      page.getByRole("status").filter({ hasText: "Waiting to sync" })
+    ).toBeVisible();
+    if (engine === webkit) await fetch(`${target}/test-network?offline=0`);
+    else await context.setOffline(false);
+    await expect(
+      page
+        .getByRole("status")
+        .filter({ hasText: "Synced with Outline · Available offline" })
+    ).toBeVisible({ timeout: 30000 });
+    const updated = await (
+      await context.request.get(`${target}/test-state`)
+    ).json();
+    expect(updated.creates - initial.creates).toBe(1);
+    expect(updated.updates - initial.updates).toBe(1);
+    expect(updated.documents.at(-1).text).toBe(
+      "Edited after the first sync, still offline ✓"
+    );
+    console.log(
+      "PASS: synced note reopens and updates offline without a second create."
+    );
+    await page
+      .getByRole("button", { name: "Remove local copy", exact: true })
+      .click();
+    await expect(
+      page.getByRole("link", { name: "Open in Outline" })
+    ).toHaveCount(0);
     await page.reload();
-    await expect(page.getByRole("link", { name: "Open saved note" })).toHaveCount(0);
-    expect((await (await context.request.get(`${target}/test-state`)).json()).documents)
-      .toEqual(result.documents);
+    await expect(
+      page.getByRole("link", { name: "Open in Outline" })
+    ).toHaveCount(0);
+    expect(
+      (await (await context.request.get(`${target}/test-state`)).json())
+        .documents
+    ).toEqual(updated.documents);
     for (const title of ["Synced one", "Synced two"]) {
       await page.getByLabel("Title", { exact: true }).fill(title);
-      await page.getByRole("button", { name: "Save note", exact: true }).click();
-      await expect(page.locator("li").filter({ hasText: title }).getByRole("status").filter({ hasText: "Synced with Outline" })).toBeVisible();
+      await page
+        .getByRole("button", { name: "Save note", exact: true })
+        .click();
+      await expect(
+        page
+          .getByRole("status")
+          .filter({ hasText: "Synced with Outline · Available offline" })
+      ).toBeVisible();
+      await page.getByRole("button", { name: "New note" }).click();
     }
     if (engine === webkit) await fetch(`${target}/test-network?offline=1`);
     else await context.setOffline(true);
     await page.getByLabel("Title", { exact: true }).fill("Keep queued note");
     await page.getByRole("button", { name: "Save note", exact: true }).click();
-    await expect(page.getByText("Saved on this device · Waiting to sync")).toBeVisible();
-    await page.getByLabel("Title", { exact: true }).fill("Keep unfinished note");
-    await expect(page.getByRole("status").filter({ hasText: /^Saved on this device$/ })).toBeVisible();
-    await page.getByRole("button", { name: "Remove all synced local copies (2)", exact: true }).click();
-    await expect(page.getByRole("status").filter({ hasText: "Synced with Outline" })).toHaveCount(0);
-    await expect(page.getByText("Saved on this device · Waiting to sync")).toBeVisible();
-    await expect(page.getByLabel("Title", { exact: true })).toHaveValue("Keep unfinished note");
+    await expect(
+      page.getByText("Saved on this device · Waiting to sync")
+    ).toBeVisible();
+    await page.getByRole("button", { name: "New note" }).click();
+    await page
+      .getByLabel("Title", { exact: true })
+      .fill("Keep unfinished note");
+    await expect(
+      page.getByRole("status").filter({ hasText: /^Saved on this device$/ })
+    ).toBeVisible();
+    await page
+      .getByRole("button", {
+        name: "Remove all synced local copies (2)",
+        exact: true,
+      })
+      .click();
+    await expect(
+      page.getByRole("status").filter({ hasText: "Synced with Outline" })
+    ).toHaveCount(0);
+    await expect(
+      page.getByText("Saved on this device · Waiting to sync")
+    ).toBeVisible();
+    await expect(page.getByLabel("Title", { exact: true })).toHaveValue(
+      "Keep unfinished note"
+    );
     await page.reload();
-    await expect(page.getByRole("button", { name: "Remove local copy", exact: true })).toHaveCount(0);
-    await expect(page.getByText("Keep queued note", { exact: true })).toBeVisible();
-    await expect(page.getByText("Keep unfinished note", { exact: true })).toBeVisible();
-    console.log("PASS: synced indicator, individual and bulk cleanup persist offline; queued and unfinished notes survive.");
+    await expect(
+      page.getByRole("button", { name: "Remove local copy", exact: true })
+    ).toHaveCount(0);
+    await expect(
+      page.getByText("Keep queued note", { exact: true })
+    ).toBeVisible();
+    await expect(
+      page.getByText("Keep unfinished note", { exact: true })
+    ).toBeVisible();
+    console.log(
+      "PASS: synced indicator, individual and bulk cleanup persist offline; queued and unfinished notes survive."
+    );
     await context.close();
   } finally {
     await fetch(`${target}/test-network?offline=0`);

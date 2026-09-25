@@ -24,12 +24,18 @@ export const QuickNote = observer(function QuickNote() {
   const syncedCount = store.drafts.filter(
     (item) => item.status === "synced"
   ).length;
+  const activeNote = store.drafts.find((item) => item.id === draft.id);
 
   const handleRemove = async (id?: string) => {
     setRemoving(true);
     setRemoveError(false);
     try {
       await store.removeSynced(id);
+      if (id === draft.id || (!id && activeNote?.status === "synced")) {
+        revision.current++;
+        setDraft({ id: uuid(), title: "", text: "" });
+        setStatus("empty");
+      }
     } catch (_error) {
       setRemoveError(true);
     } finally {
@@ -73,9 +79,7 @@ export const QuickNote = observer(function QuickNote() {
     try {
       await store.save(draft);
       await store.queue(draft.id);
-      revision.current++;
-      setDraft({ id: uuid(), title: "", text: "" });
-      setStatus("empty");
+      setStatus("saved");
       void sync();
     } catch (_error) {
       setStatus("error");
@@ -89,7 +93,7 @@ export const QuickNote = observer(function QuickNote() {
       <Heading>{t("Quick note")}</Heading>
       <p>
         {t(
-          "Write now, even offline. Saved notes sync to Drafts when you reconnect."
+          "Write and keep editing offline. Changes sync to Drafts when a connection is available."
         )}
       </p>
       <Form
@@ -126,11 +130,63 @@ export const QuickNote = observer(function QuickNote() {
         </p>
         <Button
           type="submit"
-          disabled={queueing || (!draft.title.trim() && !draft.text.trim())}
+          disabled={
+            queueing ||
+            activeNote?.status === "synced" ||
+            (!draft.title.trim() && !draft.text.trim())
+          }
         >
-          {t("Save note")}
+          {t(
+            activeNote?.status === "synced"
+              ? "Synced"
+              : activeNote?.status === "queued"
+                ? "Sync note"
+                : "Save note"
+          )}
         </Button>
+        {activeNote && (
+          <Button
+            neutral
+            type="button"
+            disabled={queueing || status === "saving" || status === "error"}
+            onClick={() => {
+              revision.current++;
+              setDraft({ id: uuid(), title: "", text: "" });
+              setStatus("empty");
+            }}
+          >
+            {t("New note")}
+          </Button>
+        )}
       </Form>
+      {activeNote?.status === "queued" && (
+        <>
+          <p role="status">{t("Saved on this device · Waiting to sync")}</p>
+          {activeNote.url?.startsWith("/doc/") && (
+            <Link to={activeNote.url}>{t("Open in Outline")}</Link>
+          )}
+        </>
+      )}
+      {activeNote?.status === "synced" && (
+        <>
+          <SyncedStatus role="status">
+            <span aria-hidden="true">✓ </span>
+            {t("Synced with Outline · Available offline")}
+          </SyncedStatus>
+          <Actions>
+            {activeNote.url?.startsWith("/doc/") && (
+              <Link to={activeNote.url}>{t("Open in Outline")}</Link>
+            )}
+            <Button
+              neutral
+              disabled={removing}
+              onClick={() => void handleRemove(activeNote.id)}
+            >
+              {t("Remove local copy")}
+            </Button>
+          </Actions>
+        </>
+      )}
       {error && <p role="alert">{t(error)}</p>}
       <h2>{t("Notes on this device")}</h2>
       <p>
@@ -165,35 +221,33 @@ export const QuickNote = observer(function QuickNote() {
             <li key={item.id}>
               <strong>{item.title || t("Untitled")}</strong>
               <Preview>{item.text}</Preview>
-              {item.status === "draft" ? (
-                <Button
-                  neutral
-                  disabled={
-                    queueing || status === "saving" || status === "error"
-                  }
-                  onClick={() => {
-                    revision.current++;
-                    setDraft({
-                      id: item.id,
-                      title: item.title,
-                      text: item.text,
-                    });
-                    setStatus("saved");
-                  }}
-                >
-                  {t("Continue writing")}
-                </Button>
-              ) : item.status === "queued" ? (
-                <span>{t("Saved on this device · Waiting to sync")}</span>
+              <Button
+                neutral
+                disabled={queueing || status === "saving" || status === "error"}
+                onClick={() => {
+                  revision.current++;
+                  setDraft({ id: item.id, title: item.title, text: item.text });
+                  setStatus("saved");
+                }}
+              >
+                {t("Continue writing")}
+              </Button>
+              {item.status === "draft" ? null : item.status === "queued" ? (
+                <>
+                  <span>{t("Saved on this device · Waiting to sync")}</span>
+                  {item.url?.startsWith("/doc/") && (
+                    <Link to={item.url}>{t("Open in Outline")}</Link>
+                  )}
+                </>
               ) : (
                 <>
                   <SyncedStatus role="status">
                     <span aria-hidden="true">✓ </span>
-                    {t("Synced with Outline")}
+                    {t("Synced with Outline · Available offline")}
                   </SyncedStatus>
                   <Actions>
                     {item.url?.startsWith("/doc/") && (
-                      <Link to={item.url}>{t("Open saved note")}</Link>
+                      <Link to={item.url}>{t("Open in Outline")}</Link>
                     )}
                     <Button
                       neutral

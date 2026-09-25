@@ -9,7 +9,10 @@ import {
 } from "react";
 import type { ReactNode } from "react";
 import { observer } from "mobx-react";
-import { OfflineDraftsStore } from "~/stores/OfflineDraftsStore";
+import {
+  OfflineDraftConflictError,
+  OfflineDraftsStore,
+} from "~/stores/OfflineDraftsStore";
 import useStores from "~/hooks/useStores";
 import {
   AuthorizationError,
@@ -24,6 +27,13 @@ interface OfflineNotesContext {
   online: boolean;
   error: string | undefined;
   sync: () => Promise<void>;
+}
+
+interface RemoteDocument {
+  url: string;
+  revision: number;
+  title: string;
+  text: string;
 }
 
 const Context = createContext<OfflineNotesContext | undefined>(undefined);
@@ -73,7 +83,14 @@ export const OfflineNotesProvider = observer(function OfflineNotesProvider({
       await store.sync({
         find: async (id) => {
           try {
-            return await documents.fetch(id, { force: true });
+            const response = await client.post<{
+              data: { document: RemoteDocument };
+            }>(
+              "/documents.info",
+              { id },
+              { headers: { "x-api-version": "2" } }
+            );
+            return response.data.document;
           } catch (error) {
             if (error instanceof NotFoundError) {
               return undefined;
@@ -86,15 +103,46 @@ export const OfflineNotesProvider = observer(function OfflineNotesProvider({
             { id: draft.id, title: draft.title },
             { text: draft.text }
           ),
+        update: async (draft, lastRevision) => {
+          try {
+            const response = await client.post<{ data: RemoteDocument }>(
+              "/documents.update",
+              {
+                id: draft.id,
+                title: draft.title,
+                text: draft.text,
+                lastRevision,
+              },
+              { retry: false }
+            );
+            return response.data;
+          } catch (error) {
+            const response = await client.post<{
+              data: { document: RemoteDocument };
+            }>(
+              "/documents.info",
+              { id: draft.id },
+              { headers: { "x-api-version": "2" } }
+            );
+            if (response.data.document.revision !== lastRevision) {
+              throw new OfflineDraftConflictError(
+                "The online note has changed"
+              );
+            }
+            throw error;
+          }
+        },
       });
       setError(undefined);
     } catch (error) {
       setError(
-        error instanceof AuthorizationError
-          ? "Your notes are still saved on this device. Outline could not authorize synchronization. Open Outline with the account that saved these notes, then try again."
-          : error instanceof BadRequestError
-            ? "Your notes are still saved on this device. Outline rejected the note. Please try again."
-            : "Your notes are still saved on this device. Synchronization will retry when a connection is available."
+        error instanceof OfflineDraftConflictError
+          ? "Your note is still saved on this device. The online version changed too. Compare both versions before syncing again."
+          : error instanceof AuthorizationError
+            ? "Your notes are still saved on this device. Outline could not authorize synchronization. Open Outline with the account that saved these notes, then try again."
+            : error instanceof BadRequestError
+              ? "Your notes are still saved on this device. Outline rejected the note. Please try again."
+              : "Your notes are still saved on this device. Synchronization will retry when a connection is available."
       );
     } finally {
       syncing.current = false;

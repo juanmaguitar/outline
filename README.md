@@ -27,12 +27,16 @@ repository kept as `upstream`. It adds a `/capture` page and a PWA shortcut for
 writing notes directly to IndexedDB. Open the application online once and allow
 its service worker to finish installing before using it offline.
 
-Text is saved locally while typing. **Save note** queues an immutable copy for
-delivery to the current user's private Drafts. Synchronization retries while the
+Text is saved locally while typing. **Save note** queues the note for delivery
+to the current user's private Drafts. The local note stays editable after
+synchronization, including without a connection. Later edits update the same
+Outline document when the connection returns. Synchronization retries while the
 application is open, verifies the current account, and uses stable document IDs
-to recover a successful creation whose response was lost. Unfinished notes can
-be reopened after closing the application. Previously loaded documents and
-collection navigation are also cached per workspace and user.
+and document revisions to avoid duplicate creations and silent overwrites.
+If the online document changes independently, the local note is retained and
+the conflict is shown. Notes can be reopened after closing the application.
+Previously loaded documents and collection navigation are also cached per
+workspace and user.
 
 This is an initial offline capture implementation, not full offline parity.
 Unvisited documents, uploads, permissions, document moves, and server searches
@@ -52,7 +56,8 @@ run `yarn vite:build`, then `node app/test/offline-server.cjs`. With
 `playwright/test` available on `NODE_PATH`, run
 `node app/test/offline-browser.cjs`, and repeat with `OUTLINE_BROWSER=webkit`.
 The checks cover opening offline, reading a cached document, closing/reopening a
-local note, and reconnecting without creating duplicates. WebKit simulates an
+local note, editing it offline after synchronization, and reconnecting without
+creating duplicates. WebKit simulates an
 unreachable server because Playwright's offline navigation emulation has a known
 [WebKit issue](https://github.com/microsoft/playwright/issues/42775).
 
