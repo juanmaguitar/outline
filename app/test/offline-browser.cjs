@@ -115,7 +115,9 @@ const target = "http://localhost:4389";
     await page.close();
     page = await context.newPage();
     await page.goto(`${target}/capture`);
-    await page.getByRole("button", { name: "Continue writing" }).click();
+    await expect(page.getByLabel("Title", { exact: true })).toHaveValue(
+      "Offline family note"
+    );
     await expect(page.getByLabel("Note", { exact: true })).toHaveValue(
       "Written without a network. Last keystroke ✓"
     );
@@ -146,9 +148,12 @@ const target = "http://localhost:4389";
       "Written without a network. Last keystroke ✓"
     );
     await page.reload();
-    await expect(
-      page.getByRole("button", { name: "Continue writing" })
-    ).toBeVisible();
+    await expect(page.getByLabel("Title", { exact: true })).toHaveValue(
+      "Offline family note"
+    );
+    await expect(page.getByLabel("Note", { exact: true })).toHaveValue(
+      "Written without a network. Last keystroke ✓"
+    );
     expect(
       (await (await context.request.get(`${target}/test-state`)).json()).creates
     ).toBe(result.creates);
@@ -164,7 +169,9 @@ const target = "http://localhost:4389";
     await page.close();
     page = await context.newPage();
     await page.goto(`${target}/capture`);
-    await page.getByRole("button", { name: "Continue writing" }).click();
+    await expect(page.getByLabel("Title", { exact: true })).toHaveValue(
+      "Offline family note"
+    );
     await expect(page.getByLabel("Note", { exact: true })).toHaveValue(
       "Written without a network. Last keystroke ✓"
     );
@@ -254,9 +261,25 @@ const target = "http://localhost:4389";
     await expect(
       page.getByText("Keep queued note", { exact: true })
     ).toBeVisible();
-    await expect(
-      page.getByText("Keep unfinished note", { exact: true })
-    ).toBeVisible();
+    await expect(page.getByLabel("Title", { exact: true })).toHaveValue(
+      "Keep unfinished note"
+    );
+    await page.getByRole("button", { name: "New note" }).click();
+    await expect(page.getByRole("button", { name: "New note" })).toHaveCount(0);
+    await page.reload();
+    const unfinished = page
+      .locator("li")
+      .filter({ hasText: "Keep unfinished note" });
+    await expect(unfinished).toBeVisible();
+    await expect(page.getByLabel("Title", { exact: true })).toHaveValue("");
+    await unfinished.getByRole("button", { name: "Continue writing" }).click();
+    await expect(page.getByLabel("Title", { exact: true })).toHaveValue(
+      "Keep unfinished note"
+    );
+    await page.reload();
+    await expect(page.getByLabel("Title", { exact: true })).toHaveValue(
+      "Keep unfinished note"
+    );
     console.log(
       "PASS: synced indicator, individual and bulk cleanup persist offline; queued and unfinished notes survive."
     );

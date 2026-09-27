@@ -41,6 +41,8 @@ export class OfflineDraftsStore {
   isLoaded = false;
   @observable
   isSyncing = false;
+  @observable
+  activeId: string | undefined;
 
   constructor(public readonly scope: string) {}
 
@@ -48,23 +50,59 @@ export class OfflineDraftsStore {
   async load(): Promise<void> {
     const database = await this.open();
     try {
-      const records = await new Promise<OfflineDraft[]>((resolve, reject) => {
-        const request = database
-          .transaction("drafts")
-          .objectStore("drafts")
-          .getAll();
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
+      const { records, activeId } = await new Promise<{
+        records: OfflineDraft[];
+        activeId: string | undefined;
+      }>((resolve, reject) => {
+        const transaction = database.transaction(["drafts", "meta"]);
+        const records = transaction.objectStore("drafts").getAll();
+        const active = transaction.objectStore("meta").get("active");
+        transaction.oncomplete = () =>
+          resolve({
+            records: records.result,
+            activeId:
+              typeof active.result?.id === "string"
+                ? active.result.id
+                : undefined,
+          });
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () =>
+          reject(transaction.error ?? new Error("Loading local notes failed"));
       });
       runInAction(() => {
         this.drafts = records.sort((a, b) =>
           b.updatedAt.localeCompare(a.updatedAt)
         );
+        this.activeId = activeId;
         this.isLoaded = true;
       });
     } finally {
       database.close();
     }
+  }
+
+  /** Remembers which note should open for this workspace and user. */
+  setActive(id: string): Promise<void> {
+    const write = this.writes.then(async () => {
+      const database = await this.open();
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const transaction = database.transaction("meta", "readwrite");
+          transaction.objectStore("meta").put({ key: "active", id });
+          transaction.oncomplete = () => resolve();
+          transaction.onerror = () => reject(transaction.error);
+          transaction.onabort = () =>
+            reject(
+              transaction.error ?? new Error("Saving the active note failed")
+            );
+        });
+      } finally {
+        database.close();
+      }
+      await this.load();
+    });
+    this.writes = write.catch(() => undefined);
+    return write;
   }
 
   /** Durably saves an unfinished note, without requiring a server connection. */
@@ -312,9 +350,15 @@ export class OfflineDraftsStore {
 
   private open(): Promise<IDBDatabase> {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open(`outline.offline-drafts.${this.scope}`, 1);
-      request.onupgradeneeded = () =>
-        request.result.createObjectStore("drafts", { keyPath: "id" });
+      const request = indexedDB.open(`outline.offline-drafts.${this.scope}`, 2);
+      request.onupgradeneeded = () => {
+        if (!request.result.objectStoreNames.contains("drafts")) {
+          request.result.createObjectStore("drafts", { keyPath: "id" });
+        }
+        if (!request.result.objectStoreNames.contains("meta")) {
+          request.result.createObjectStore("meta", { keyPath: "key" });
+        }
+      };
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
       request.onblocked = () =>

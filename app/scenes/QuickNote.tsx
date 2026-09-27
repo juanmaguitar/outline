@@ -18,9 +18,12 @@ export const QuickNote = observer(function QuickNote() {
     "empty"
   );
   const [queueing, setQueueing] = useState(false);
+  const [switching, setSwitching] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [removeError, setRemoveError] = useState(false);
+  const [readyScope, setReadyScope] = useState<string>();
   const revision = useRef(0);
+  const restoredScope = useRef<string>();
   const syncedCount = store.drafts.filter(
     (item) => item.status === "synced"
   ).length;
@@ -32,8 +35,10 @@ export const QuickNote = observer(function QuickNote() {
     try {
       await store.removeSynced(id);
       if (id === draft.id || (!id && activeNote?.status === "synced")) {
+        const next = { id: uuid(), title: "", text: "" };
+        await store.setActive(next.id);
         revision.current++;
-        setDraft({ id: uuid(), title: "", text: "" });
+        setDraft(next);
         setStatus("empty");
       }
     } catch (_error) {
@@ -44,7 +49,60 @@ export const QuickNote = observer(function QuickNote() {
   };
 
   useEffect(() => {
-    if (status !== "saving" && status !== "error") {
+    if (!store.isLoaded || restoredScope.current === store.scope) {
+      return;
+    }
+    restoredScope.current = store.scope;
+    const saved = store.drafts.find((item) => item.id === store.activeId);
+    if (saved) {
+      setDraft({ id: saved.id, title: saved.title, text: saved.text });
+      setStatus("saved");
+      setReadyScope(store.scope);
+      return;
+    }
+    if (store.activeId) {
+      setDraft({ id: store.activeId, title: "", text: "" });
+      setStatus("empty");
+      setReadyScope(store.scope);
+      return;
+    }
+    const recent = store.drafts[0];
+    if (recent) {
+      setDraft({ id: recent.id, title: recent.title, text: recent.text });
+      setStatus("saved");
+      void store.setActive(recent.id).catch(() => setStatus("error"));
+    } else {
+      setDraft({ id: uuid(), title: "", text: "" });
+      setStatus("empty");
+    }
+    setReadyScope(store.scope);
+  }, [store, store.isLoaded]);
+
+  const handleSwitch = async (next: {
+    id: string;
+    title: string;
+    text: string;
+  }) => {
+    setSwitching(true);
+    try {
+      await store.setActive(next.id);
+      const current = store.drafts.find((item) => item.id === next.id);
+      revision.current++;
+      setDraft(
+        current
+          ? { id: current.id, title: current.title, text: current.text }
+          : next
+      );
+      setStatus(current || next.title || next.text ? "saved" : "empty");
+    } catch (_error) {
+      setStatus("error");
+    } finally {
+      setSwitching(false);
+    }
+  };
+
+  useEffect(() => {
+    if (status !== "saving" && status !== "error" && !switching) {
       return;
     }
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -53,7 +111,7 @@ export const QuickNote = observer(function QuickNote() {
     };
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [status]);
+  }, [status, switching]);
 
   const handleChange = (field: "title" | "text", value: string) => {
     const next = { ...draft, [field]: value };
@@ -62,7 +120,10 @@ export const QuickNote = observer(function QuickNote() {
     setStatus("saving");
     void store
       .save(next)
-      .then(() => {
+      .then(async () => {
+        if (store.activeId !== next.id) {
+          await store.setActive(next.id);
+        }
         if (revision.current === currentRevision) {
           setStatus("saved");
         }
@@ -79,6 +140,9 @@ export const QuickNote = observer(function QuickNote() {
     try {
       await store.save(draft);
       await store.queue(draft.id);
+      if (store.activeId !== draft.id) {
+        await store.setActive(draft.id);
+      }
       setStatus("saved");
       void sync();
     } catch (_error) {
@@ -87,6 +151,15 @@ export const QuickNote = observer(function QuickNote() {
       setQueueing(false);
     }
   };
+
+  if (readyScope !== store.scope) {
+    return (
+      <Scene title={t("Quick note")}>
+        <Heading>{t("Quick note")}</Heading>
+        <p role="status">{t("Opening your note on this device…")}</p>
+      </Scene>
+    );
+  }
 
   return (
     <Scene title={t("Quick note")}>
@@ -106,14 +179,14 @@ export const QuickNote = observer(function QuickNote() {
         <TitleInput
           id="quick-note-title"
           value={draft.title}
-          disabled={queueing}
+          disabled={queueing || switching || removing}
           onChange={(event) => handleChange("title", event.target.value)}
         />
         <label htmlFor="quick-note-text">{t("Note")}</label>
         <NoteInput
           id="quick-note-text"
           value={draft.text}
-          disabled={queueing}
+          disabled={queueing || switching || removing}
           onChange={(event) => handleChange("text", event.target.value)}
           placeholder={t("Start writing…")}
         />
@@ -132,6 +205,8 @@ export const QuickNote = observer(function QuickNote() {
           type="submit"
           disabled={
             queueing ||
+            switching ||
+            removing ||
             activeNote?.status === "synced" ||
             (!draft.title.trim() && !draft.text.trim())
           }
@@ -148,12 +223,16 @@ export const QuickNote = observer(function QuickNote() {
           <Button
             neutral
             type="button"
-            disabled={queueing || status === "saving" || status === "error"}
-            onClick={() => {
-              revision.current++;
-              setDraft({ id: uuid(), title: "", text: "" });
-              setStatus("empty");
-            }}
+            disabled={
+              queueing ||
+              switching ||
+              removing ||
+              status === "saving" ||
+              status === "error"
+            }
+            onClick={() =>
+              void handleSwitch({ id: uuid(), title: "", text: "" })
+            }
           >
             {t("New note")}
           </Button>
@@ -223,12 +302,20 @@ export const QuickNote = observer(function QuickNote() {
               <Preview>{item.text}</Preview>
               <Button
                 neutral
-                disabled={queueing || status === "saving" || status === "error"}
-                onClick={() => {
-                  revision.current++;
-                  setDraft({ id: item.id, title: item.title, text: item.text });
-                  setStatus("saved");
-                }}
+                disabled={
+                  queueing ||
+                  switching ||
+                  removing ||
+                  status === "saving" ||
+                  status === "error"
+                }
+                onClick={() =>
+                  void handleSwitch({
+                    id: item.id,
+                    title: item.title,
+                    text: item.text,
+                  })
+                }
               >
                 {t("Continue writing")}
               </Button>
