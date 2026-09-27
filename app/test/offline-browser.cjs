@@ -272,10 +272,13 @@ const target = "http://localhost:4389";
       .filter({ hasText: "Keep unfinished note" });
     await expect(unfinished).toBeVisible();
     await expect(page.getByLabel("Title", { exact: true })).toHaveValue("");
-    await unfinished.getByRole("button", { name: "Continue writing" }).click();
+    await unfinished
+      .getByRole("button", { name: "Keep unfinished note" })
+      .click();
     await expect(page.getByLabel("Title", { exact: true })).toHaveValue(
       "Keep unfinished note"
     );
+    await expect(page).toHaveURL(`${target}/capture`);
     await page.reload();
     await expect(page.getByLabel("Title", { exact: true })).toHaveValue(
       "Keep unfinished note"

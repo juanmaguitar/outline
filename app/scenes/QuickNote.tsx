@@ -298,10 +298,8 @@ export const QuickNote = observer(function QuickNote() {
           .filter((item) => item.id !== draft.id)
           .map((item) => (
             <li key={item.id}>
-              <strong>{item.title || t("Untitled")}</strong>
-              <Preview>{item.text}</Preview>
-              <Button
-                neutral
+              <TitleButton
+                type="button"
                 disabled={
                   queueing ||
                   switching ||
@@ -317,8 +315,9 @@ export const QuickNote = observer(function QuickNote() {
                   })
                 }
               >
-                {t("Continue writing")}
-              </Button>
+                {item.title || t("Untitled")}
+              </TitleButton>
+              <Preview>{item.text}</Preview>
               {item.status === "draft" ? null : item.status === "queued" ? (
                 <>
                   <span>{t("Saved on this device · Waiting to sync")}</span>
@@ -394,6 +393,28 @@ const Notes = styled.ul`
   li {
     padding: 16px 0;
     border-bottom: 1px solid ${(props) => props.theme.divider};
+  }
+`;
+const TitleButton = styled.button`
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 8px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover,
+  &:focus-visible {
+    text-decoration: underline;
+  }
+
+  &:disabled {
+    cursor: default;
   }
 `;
 const Preview = styled.p`
