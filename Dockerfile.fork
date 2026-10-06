@@ -3,6 +3,19 @@ FROM outlinewiki/outline:1.10.0@sha256:cc9f1f05fd7cd316745b5fc9cfe01e681b1b4cf97
 ARG FORK_COMMIT
 LABEL org.opencontainers.image.source="https://github.com/juanmaguitar/outline"
 LABEL org.opencontainers.image.revision="${FORK_COMMIT}"
-LABEL org.opencontainers.image.description="Outline 1.10.0 with offline capture and navigation"
+LABEL org.opencontainers.image.description="Outline 1.10.0 with offline capture, navigation and always-shared collections"
 COPY --chown=nodejs:nodejs .fork-build/app /opt/outline/build/app
 COPY --chown=nodejs:nodejs .fork-build/app.js /opt/outline/build/server/routes/app.js
+# Every collection stays shared with the whole workspace: a missing or null
+# (private) permission becomes read_write on create, import and update. The
+# server here is stock 1.10.0, so the compiled schema is patched in place
+# (same rule as server/routes/api/collections/schema.ts). The build fails if
+# the expected 1.10.0 code is not found.
+RUN f=build/server/routes/api/collections/schema.js && \
+  sed -i \
+    -e 's/(0, _compat.isUndefined)(val) ? null : val/val ?? _types.CollectionPermission.ReadWrite/' \
+    -e 's/permission: _zod.z.enum(_types.CollectionPermission).nullish(),$/permission: _zod.z.enum(_types.CollectionPermission).nullish().transform((val)=>val === null ? _types.CollectionPermission.ReadWrite : val),/' \
+    "$f" && \
+  test "$(grep -c 'val ?? _types.CollectionPermission.ReadWrite' "$f")" = 2 && \
+  test "$(grep -c 'val === null ? _types.CollectionPermission.ReadWrite' "$f")" = 1 && \
+  node --check "$f"
