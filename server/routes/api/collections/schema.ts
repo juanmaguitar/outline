@@ -35,10 +35,11 @@ export const CollectionsCreateSchema = BaseSchema.extend({
         .nullish(),
       description: z.string().nullish(),
       data: ProsemirrorSchema({ allowEmpty: true }).nullish(),
+      // Fork: collections are always shared with the whole workspace.
       permission: z
         .enum(CollectionPermission)
         .nullish()
-        .transform((val) => (isUndefined(val) ? null : val)),
+        .transform((val) => val ?? CollectionPermission.ReadWrite),
       sharing: z.boolean().prefault(true),
       icon: zodIconType().optional(),
       sort: z
@@ -94,10 +95,11 @@ export type CollectionsDocumentsReq = z.infer<
 
 export const CollectionsImportSchema = BaseSchema.extend({
   body: z.object({
+    // Fork: imported collections are shared with the whole workspace too.
     permission: z
       .enum(CollectionPermission)
       .nullish()
-      .transform((val) => (isUndefined(val) ? null : val)),
+      .transform((val) => val ?? CollectionPermission.ReadWrite),
     attachmentId: z.uuid(),
     /**
      * The format of the upload. Both `json` and `outline-markdown` are
@@ -195,7 +197,13 @@ export const CollectionsUpdateSchema = BaseSchema.extend({
     description: z.string().nullish(),
     data: ProsemirrorSchema({ allowEmpty: true }).nullish(),
     icon: zodIconType().nullish(),
-    permission: z.enum(CollectionPermission).nullish(),
+    // Fork: a collection cannot be made private again.
+    permission: z
+      .enum(CollectionPermission)
+      .nullish()
+      .transform((val) =>
+        val === null ? CollectionPermission.ReadWrite : val
+      ),
     color: z
       .string()
       .regex(ValidateColor.regex, { message: ValidateColor.message })

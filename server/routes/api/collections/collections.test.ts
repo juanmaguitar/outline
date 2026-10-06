@@ -1645,7 +1645,7 @@ describe("#collections.create", () => {
     expect(body.data.sharing).toBe(false);
   });
 
-  it("should return correct policies with private collection", async () => {
+  it("should never create a private collection (fork)", async () => {
     const user = await buildUser();
     const res = await server.post("/api/collections.create", user, {
       body: {
@@ -1655,7 +1655,7 @@ describe("#collections.create", () => {
     });
     const body = await res.json();
     expect(res.status).toEqual(200);
-    expect(body.data.permission).toEqual(null);
+    expect(body.data.permission).toEqual(CollectionPermission.ReadWrite);
     expect(body.policies.length).toBe(1);
     expect(body.policies[0].abilities.read).toBeTruthy();
   });
@@ -2056,11 +2056,11 @@ describe("#collections.update", () => {
     });
     const body = await res.json();
     expect(res.status).toEqual(200);
-    expect(body.data.permission).toBe(null);
+    expect(body.data.permission).toBe(CollectionPermission.ReadWrite);
     expect(body.data.name).toBe(collection.name);
   });
 
-  it("allows editing from non-private to private collection, and trims whitespace", async () => {
+  it("keeps the collection shared when asked to make it private (fork), and trims whitespace", async () => {
     const team = await buildTeam();
     const admin = await buildAdmin({ teamId: team.id });
     const collection = await buildCollection({ teamId: team.id });
@@ -2074,7 +2074,7 @@ describe("#collections.update", () => {
     const body = await res.json();
     expect(res.status).toEqual(200);
     expect(body.data.name).toBe("Test");
-    expect(body.data.permission).toBe(null);
+    expect(body.data.permission).toBe(CollectionPermission.ReadWrite);
     // ensure we return with a write level policy
     expect(body.policies.length).toBe(1);
     expect(body.policies[0].abilities.update).toBeTruthy();
