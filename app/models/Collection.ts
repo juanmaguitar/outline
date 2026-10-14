@@ -12,6 +12,7 @@ import type CollectionsStore from "~/stores/CollectionsStore";
 import type Document from "~/models/Document";
 import ParanoidModel from "~/models/base/ParanoidModel";
 import { client } from "~/utils/ApiClient";
+import Logger from "~/utils/Logger";
 import type User from "./User";
 import Field from "./decorators/Field";
 import { AfterChange } from "./decorators/Lifecycle";
@@ -243,7 +244,13 @@ export default class Collection extends ParanoidModel {
     if (this.isFetching) {
       return;
     }
-    if (this.documents && options?.force !== true) {
+    // A tree restored from the device cache may be missing documents created
+    // elsewhere since, so it is revalidated once per session while online.
+    if (
+      this.documents &&
+      options?.force !== true &&
+      (this.hasFetchedDocuments || !navigator.onLine)
+    ) {
       return;
     }
 
@@ -256,7 +263,18 @@ export default class Collection extends ParanoidModel {
 
       runInAction("Collection#fetchDocuments", () => {
         this.documents = res.data;
+        this.hasFetchedDocuments = true;
         this.store.add(this);
+      });
+    } catch (err) {
+      // Without a cached tree there is nothing to show, so callers still see
+      // the failure; with one, the cached tree stays until the next attempt.
+      if (!this.documents) {
+        throw err;
+      }
+      Logger.warn("Failed to revalidate cached collection documents", {
+        collectionId: this.id,
+        error: err,
       });
     } finally {
       this.isFetching = false;
@@ -469,4 +487,7 @@ export default class Collection extends ParanoidModel {
   }
 
   private isFetching = false;
+
+  /** Whether the documents tree has been loaded from the server this session. */
+  private hasFetchedDocuments = false;
 }
